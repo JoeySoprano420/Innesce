@@ -1,0 +1,152 @@
+# Innesce (N‑S) — Starter Skeleton (CMake + C++23 + optional LLVM)
+
+This is a minimal, **deterministic AOT** skeleton you can extend into the full Innesce compiler.
+
+## Layout
+```
+innesce-starter/
+  CMakeLists.txt
+  cmake/FindLLVMHelper.cmake
+  src/
+    core/                # No-LLVM utilities used by tests
+      durations.hpp
+      truth.hpp
+      quarantine.hpp
+      lanes.hpp
+      lanes.cpp
+      checkpoint.hpp
+    backend/llvm/        # LLVM stub
+      ir_builder.hpp
+      ir_builder.cpp
+  cli/
+    innescec.cpp         # CLI driver (prints version banner)
+  tests/
+    CMakeLists.txt
+    test_common.hpp
+    test_durations.cpp
+    test_truth.cpp
+    test_quarantine.cpp
+    test_lanes.cpp
+```
+
+## Build (no LLVM needed for core + tests)
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+## Build with LLVM backend enabled
+Make sure LLVM 17+ is installed and `LLVM_DIR` points at its CMake config folder (e.g. `/usr/lib/llvm-17/lib/cmake/llvm`).
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DINNSCE_ENABLE_LLVM=ON -DLLVM_DIR=/path/to/llvm/cmake
+cmake --build build -j
+```
+
+On Windows (MSVC), use the “x64 Native Tools” prompt and pass `-G "Ninja"` (recommended) or use the default MSBuild generator:
+```pwsh
+cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DINNSCE_ENABLE_LLVM=ON -DLLVM_DIR="C:/Program Files/LLVM/lib/cmake/llvm"
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+## What’s here
+- **durations**: strong unit types (`ns, us, ms, sec`) with explicit conversion and type-safe ops.
+- **truth**: 4‑valued truth lattice with constexpr `t_and`, `t_or`, `t_not` folding.
+- **quarantine**: containment utility to record recoverable failures instead of crashing.
+- **lanes**: deterministic, fixed worker lanes + `parallel_for` and simple frame packetizer.
+- **LLVM stub**: `IrBuilder` placeholder to start wiring AST→LLVM IR later.
+
+All components are written in portable C++23 with no exceptions in hot paths.
+
+
+## Try the tiny front-end + codegen
+```bash
+# Configure with LLVM enabled (set LLVM_DIR to your install)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DINNSCE_ENABLE_LLVM=ON -DLLVM_DIR=/path/to/llvm/lib/cmake/llvm
+cmake --build build -j
+
+# Compile the sample into an object file
+./build/innescec sample/hello.inn -o hello.o
+
+# Link to an executable (Linux/macOS)
+clang hello.o -o hello
+./hello ; echo $?
+```
+Expected exit code is `40` for the default sample (returns `x`).
+
+**Subset supported right now**
+- Single `main()` function returning `i32`
+- `let <name>: i32 := <int|ident>;`
+- `return <int|ident>;`
+
+
+### New: arithmetic + `if/then/else`
+Supported now:
+- integer expressions: `+ - * /` and parentheses, unary `-`
+- `if <expr> then ... [else ...] end` (non-zero is true)
+
+Try it:
+```bash
+./build/innescec sample/arith.inn -o arith.o
+clang arith.o -o arith
+./arith ; echo $?
+```
+You'll see the exit code equal to `x + y * 2` from the sample (deterministic).
+
+
+## New: Enums and `match`
+You can now declare enums and pattern-match exhaustively.
+
+```inn
+type Color is enum { Red, Green, Blue };
+
+fn main() -> i32 is
+  let c: Color := Green;
+  match c is
+    case Red   => return 10;
+    case Green => return 20;
+    case Blue  => return 30;
+  end
+end
+```
+
+Build & run:
+```bash
+./build/innescec sample/match.inn -o match.o
+clang match.o -o match
+./match ; echo $?
+# => 20
+```
+Rules:
+- Enums lower to `i32` discriminants starting at 0.
+- `match` must be exhaustive unless `case default => ...` is present.
+- Case bodies can contain multiple statements; fallthrough is not allowed—each case is a block.
+
+
+## First-class durations, Hot qualifier, gates, and inline asm
+- **Durations as types:** declare `ms` or `sec` variables; use literals (`100 ms`, `2 sec`); arithmetic is unit-checked:
+  - `+`/`-` require the **same unit** (ms with ms, sec with sec).
+  - `*`/`/`: duration with i32 yields duration (same unit). i32 with i32 stays i32.
+- **`sleep(<duration>)`:** takes a duration value and calls the right runtime shim. Requires gate **`time`** on the function.
+- **Hot qualifier:** add `with [Hot]` (or together with gates: `with [time, Hot]`) on `fn` to mark the function as hot. Lowers to LLVM `hot` attribute.
+- **Gates scaffold:** add gate names in the `with [ ... ]` list. `sleep` requires `time`; more APIs can hook into gates later.
+- **Inline asm:** minimal `asm <mnemonic>;` form, Intel (NASM-like) dialect via LLVM inline asm.
+
+Example:
+```inn
+fn main() -> i32 with [time, Hot] is
+  let t: ms := 100 ms * 2;
+  sleep(t);
+  asm cpuid;
+  return 0;
+end
+```
+
+Run it:
+```bash
+./build/innescec sample/durations_hot_asm.inn -o dha.o
+clang dha.o -o dha
+./dha ; echo $?
+```

@@ -1,0 +1,10 @@
+-- Arithmetic + if/then/else
+fn main() -> i32 is
+  let x: i32 := 10 * (3 + 1);
+  let y: i32 := x - 5;
+  if x + y then
+    return x + y * 2;
+  else
+    return 0;
+  end
+end

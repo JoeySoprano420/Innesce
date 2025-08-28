@@ -1,0 +1,9 @@
+-- Durations, Hot qualifier, gates scaffold, and inline asm
+type Color is enum { Red, Green, Blue };
+
+fn main() -> i32 with [time, Hot] is
+  let t: ms := 100 ms * 2;
+  sleep(t);
+  asm cpuid;
+  return 0;
+end
