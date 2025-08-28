@@ -1,0 +1,12 @@
+
+-- Multi-line asm with inputs and clobbers
+fn main() -> i32 with [time, Hot] is
+  let v: i32 := 5;
+  asm {
+    intel;
+    ins r(v), i(7);
+    clobbers cc, memory;
+    body: mov eax, eax; cpuid; add eax, eax;
+  };
+  return 0;
+end

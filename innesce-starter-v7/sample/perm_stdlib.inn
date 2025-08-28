@@ -1,0 +1,9 @@
+
+-- Permissioned stdlib stub usage
+fn main() -> i32 with [fs.read, fs.write, net, time] is
+  let x: i32 := fs_read_i32();
+  let ok: i32 := fs_write_i32();
+  let n: i32 := net_ping_i32();
+  sleep(100 ms);
+  return x + ok + n;
+end

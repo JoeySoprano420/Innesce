@@ -1,0 +1,9 @@
+
+-- Duration conversions via `as`
+fn main() -> i32 with [time] is
+  let a: ms := 1500 ms;
+  let b: sec := (a as sec);
+  let c: ms := (b as ms);
+  sleep(c);
+  return 0;
+end
