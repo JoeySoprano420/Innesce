@@ -1,0 +1,13 @@
+
+-- Multi-output asm as expression with tuple destructuring
+fn main() -> i32 with [Hot] is
+  let v: i32 := 5;
+  let (a, b): (i32, i32) := asm {
+    intel;
+    outs ={eax}(_), ={ebx}(_);
+    ins  r(v), i(10);
+    clobbers cc, memory;
+    body: mov eax, v; mov ebx, 10; add eax, ebx;
+  };
+  return a + b;
+end
