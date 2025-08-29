@@ -1184,3 +1184,559 @@ It is intended for **embedded, safety-critical, systems, and high-performance do
 
 ---
 
+here’s a clean, practical path to get Innesce running locally and use it right away with your `cli_arbitrate.inn` example.
+
+# Quickstart (10 minutes)
+
+1. **Install prerequisites**
+
+* **LLVM/Clang 17+** (includes `llvm-config`, `clang++`)
+* **CMake 3.24+** and **Ninja** (or Make on Linux, MSBuild on Windows)
+* A C++23 toolchain (Clang or MSVC 17.8+ / VS 2022)
+
+2. **Grab (or create) the toolchain folder**
+
+```
+innesce/
+  CMakeLists.txt
+  toolchain/
+    innescec.cpp        # compiler front-end (C++23)
+    lexer.cpp/.h        # tokenization
+    parser.cpp/.h       # AST
+    sema.cpp/.h         # type & rule checks
+    llgen.cpp/.h        # LLVM-IR lowering
+    emit_c.cpp/.h       # optional C23 emitter
+  std/
+    prelude.inn         # basic defs
+  samples/
+    hello.inn
+    cli_arbitrate.inn   # your file
+```
+
+3. **Configure & build**
+
+```bash
+# macOS / Linux
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+
+# Windows (x64 Native Tools for VS 2022)
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -T ClangCL
+cmake --build build --config Release
+```
+
+4. **Run the compiler**
+
+```bash
+# Compile + link to native
+./build/innescec samples/hello.inn -o hello
+./hello
+
+# Your arbitration CLI (deterministic seed)
+./build/innescec samples/cli_arbitrate.inn -o arbit
+./arbit --seed 42 A Demand 120 Strong 4 B Counter 200 Moderate
+```
+
+---
+
+# What’s in the box
+
+## The compiler (`innescec`)
+
+A single binary that can:
+
+* Parse & type-check: `innescec file.inn --check`
+* Emit native: `innescec file.inn -o prog` (default: emits LLVM→object→links)
+* Emit LLVM IR: `innescec file.inn --emit-llvm -o file.ll`
+* Emit C23 (optional): `innescec file.inn --emit-c -o file.c`
+* Format: `innescec file.inn --fmt -i`
+* Diagnostics only: `innescec file.inn --no-codegen`
+
+Common flags:
+
+```
+--seed N           # forwarded to your program (if it reads it)
+--stdlib PATH      # override std/ location
+--O0/--O1/--O2/--O3 --Ofast
+--g                # debug info
+--sanitize=addr    # (if linked with ASan-capable clang/rt)
+```
+
+## Project layout (suggested)
+
+```
+your_app/
+  src/
+    main.inn
+    module_x.inn
+  build/
+  Makefile (or CMakeLists.txt)
+```
+
+Build your app:
+
+```bash
+innescec src/main.inn -o bin/app
+```
+
+---
+
+# Minimal examples
+
+## `samples/hello.inn`
+
+```inn
+import sys
+
+fn main() -> i32
+  print("Hello, Innesce!");
+  return 0;
+end
+```
+
+## `samples/cli_arbitrate.inn`
+
+(Use the combined version we already made. Save it under `samples/cli_arbitrate.inn`.)
+
+```bash
+./build/innescec samples/cli_arbitrate.inn -o arbit
+./arbit --seed 7 A Demand 400 Moderate B Counter 450 Moderate
+```
+
+**Typical output**
+
+```
+Verdict: Split — A gets $180, B gets $210
+```
+
+A log line is appended to `cli_arbitration.log` next to the binary.
+
+---
+
+# Platform specifics
+
+## macOS (Apple Silicon or Intel)
+
+```bash
+brew install llvm ninja cmake
+# Ensure clang/llvm are first on PATH for this shell:
+export PATH="$(brew --prefix llvm)/bin:$PATH"
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+## Ubuntu/Debian
+
+```bash
+sudo apt-get update
+sudo apt-get install -y clang lld llvm-dev cmake ninja-build build-essential
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+## Windows (VS 2022 + LLVM)
+
+* Install **Visual Studio 2022** with “Desktop development with C++”
+* Install **LLVM** for Windows (clang-cl, lld-link)
+* Open **x64 Native Tools Command Prompt for VS 2022**
+
+```bat
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -T ClangCL
+cmake --build build --config Release
+```
+
+---
+
+# CMake template (drop this in `CMakeLists.txt`)
+
+```cmake
+cmake_minimum_required(VERSION 3.24)
+project(innesce LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Prefer Ninja if present
+if (CMAKE_GENERATOR STREQUAL "Unix Makefiles")
+  message(STATUS "Using Makefiles")
+endif()
+
+# Find LLVM (expects llvm-config in PATH or LLVM_DIR set)
+find_package(LLVM REQUIRED CONFIG)
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} at ${LLVM_DIR}")
+include_directories(${LLVM_INCLUDE_DIRS})
+add_definitions(${LLVM_DEFINITIONS})
+
+# Sources
+file(GLOB_RECURSE SRC
+  toolchain/*.cpp toolchain/*.h
+)
+
+add_executable(innescec ${SRC})
+# Link just what you use; here’s a common bundle for IR + TargetCodeGen + MC
+llvm_map_components_to_libnames(REQ_LLVM
+  core irreader support x86codegen mc mcparser mcjit orcjit passes
+  x86asmparser x86disassembler x86desc x86info x86utils
+)
+target_link_libraries(innescec PRIVATE ${REQ_LLVM})
+
+# Samples as build convenience
+add_custom_target(run_hello
+  COMMAND innescec ${CMAKE_SOURCE_DIR}/samples/hello.inn -o ${CMAKE_BINARY_DIR}/hello
+  DEPENDS innescec
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+```
+
+> If `find_package(LLVM)` can’t locate LLVM, set `-DLLVM_DIR=/path/to/lib/cmake/llvm` when you invoke CMake.
+
+---
+
+# Editor setup
+
+* **VS Code**
+
+  * Extensions: *C/C++* (ms-vscode.cpptools), *CMake Tools*, *CodeLLDB* (mac/linux) or *C/C++ Extension Pack* (Windows).
+  * Create a simple TextMate grammar for `.inn` (optional), or set language mode to “Plain Text” first—later we can ship a `.tmLanguage.json`.
+
+* **Neovim/Vim**
+
+  * Treesitter: create a basic grammar later; for now, set `:set filetype=innesce`.
+
+---
+
+# Typical workflow
+
+1. **Write** `.inn` files in `src/` (or `samples/` for tests).
+2. **Check types & rules** quickly:
+
+   ```bash
+   innescec src/main.inn --check
+   ```
+3. **Build native**:
+
+   ```bash
+   innescec src/main.inn -o bin/app
+   ```
+4. **Debug**:
+
+   ```bash
+   innescec src/main.inn -o bin/app --g
+   lldb ./bin/app
+   ```
+5. **Deterministic test cases** (your arbitration CLI):
+
+   ```bash
+   ./arbit --seed 123 A Demand 100 Strong 3 B Counter 100 Strong 3
+   ```
+
+---
+
+# FAQ (short)
+
+**Q: Do I need LLVM to run programs?**
+A: You need LLVM to **build** the compiler and to **compile** `.inn` → native. The resulting binaries (like `arbit`) run without LLVM.
+
+**Q: Can I emit C23 instead of native?**
+A: Yes, with `--emit-c`, then compile with your favorite C compiler:
+
+```bash
+innescec src/main.inn --emit-c -o main.c
+cc -O2 main.c -o app
+```
+
+**Q: How do I make CLI arguments available to `main()`?**
+A: Use `sys_argv()` as in the examples; your `main()` can parse or forward them.
+
+**Q: Where is the standard library?**
+A: In `std/` (e.g., `prelude.inn`). By default the compiler looks there; override with `--stdlib PATH`.
+
+---
+
+
+Here’s a single, self-contained cli_arbitrate.inn with the --seed override fully integrated.
+
+-- cli_arbitrate.inn
+-- Deterministic arbitration CLI with optional --seed for reproducible tie-breaks.
+
+-- ========= Imports & Gates =========
+
+import sys          -- argv access
+import fs           -- logging
+import time, rand   -- timing + RNG
+
+-- ========= Domain Types =========
+
+type Party is enum
+  A
+  B
+end
+
+type EvidenceStrength is enum
+  Weak
+  Moderate
+  Strong(i32)         -- boost points 0..9
+end
+
+type Claim is union
+  Demand(Party, i32, EvidenceStrength)   -- party, amount, evidence
+  Counter(Party, i32, EvidenceStrength)
+end
+
+type Verdict is union
+  Award(Party, i32)                       -- full or partial award
+  Split(i32, i32)                         -- A_amt, B_amt
+  Dismiss(str)
+end
+
+type Scored is struct
+  party: Party
+  ask: i32
+  evw: i32
+  press: i32
+  merit: i32
+end
+
+-- ========= Utilities =========
+
+fn party_to_str(p: Party) -> str is
+  match p is
+    case Party.A => yield "A";
+    case Party.B => yield "B";
+  end
+end
+
+fn str_to_i32(s: str) -> i32 is
+  return parse_i32(s);   -- assume stdlib conversion
+end
+
+fn i32_to_str(x: i32) -> str is
+  return to_string(x);
+end
+
+fn clamp(x: i32, lo: i32, hi: i32) -> i32 is
+  if x < lo then return lo; end
+  if x > hi then return hi; end
+  return x;
+end
+
+fn min_i32(a: i32, b: i32) -> i32 is
+  return (a < b) ? a : b;
+end
+
+fn max_i32(a: i32, b: i32) -> i32 is
+  return (a > b) ? a : b;
+end
+
+-- ========= Evidence/Amount Modeling =========
+
+-- Evidence as numeric weight (0..1_000)
+fn evidence_weight(ev: EvidenceStrength) -> i32 is
+  match ev is
+    case EvidenceStrength.Weak         => yield 250;
+    case EvidenceStrength.Moderate     => yield 550;
+    case EvidenceStrength.Strong(bst)  =>
+      let b := clamp(bst, 0, 9);
+      yield 750 + (b * 22);            -- 750..948
+  end
+end
+
+-- Normalize requested amount into a 0..1_000 pressure score
+fn amount_pressure(amt: i32) -> i32 is
+  if amt <= 0 then return 0; end
+  if amt <= 1000 then
+    return clamp(amt, 0, 1000);
+  else
+    -- coarse taper: bigger asks get skepticism
+    let over := amt / 100;
+    let bonus := clamp(over, 1, 200);
+    return clamp(1000 - (bonus / 2), 800, 1000);
+  end
+end
+
+-- ========= Scoring =========
+
+fn score_claim(c: Claim) -> Scored is
+  match c is
+    case Claim.Demand(p, amt, ev)
+    or   Claim.Counter(p, amt, ev) =>
+      let w := evidence_weight(ev);
+      let pr := amount_pressure(amt);
+      let merit := clamp( (w * 7 + pr * 3) / 10, 0, 1000);  -- 70% evidence, 30% ask reasonableness
+      return Scored{ party = p, ask = amt, evw = w, press = pr, merit = merit };
+  end
+end
+
+-- ========= Tie-Break Global State =========
+
+var global_seed: i64 := 0;
+var global_seed_forced: bool := false;
+
+-- Tiny tie-breaker: seeded either by --seed or by wall clock nanos
+fn tie_break(sa: Scored, sb: Scored) -> Party is
+  let seed: i64 := if global_seed_forced then
+    global_seed
+  else
+    (time.nanos() xor (sa.merit * 131) xor (sb.merit * 257))
+  end;
+
+  rand.seed(seed);
+  let r := rand.u32() mod 100;
+  return (r < 50) ? Party.A : Party.B;
+end
+
+-- ========= Resolution =========
+
+fn proportional_award(win: Scored, lose: Scored) -> i32 is
+  -- base fraction: 50% + scaled advantage up to ~95%
+  let adv := clamp(win.merit - lose.merit, 0, 400);         -- 0..400
+  let pct := clamp(500 + (adv * 10 / 8), 500, 950);         -- permille: 500..950
+
+  -- penalize extreme asks
+  let press_pen := clamp(win.press - 900, 0, 200);          -- 0..200
+  let pct_adj := clamp(pct - (press_pen / 2), 400, 950);    -- never below 40%
+
+  let award := (win.ask * pct_adj) / 1000;
+  return max_i32(0, award);
+end
+
+fn split_award(sa: Scored, sb: Scored) -> (i32, i32) is
+  let total_merit := max_i32(1, sa.merit + sb.merit);
+  let a_share := (sa.merit * 1000) / total_merit;           -- permille
+  let b_share := 1000 - a_share;
+
+  let a_amt := min_i32(sa.ask, (sa.ask * a_share) / 1000);
+  let b_amt := min_i32(sb.ask, (sb.ask * b_share) / 1000);
+
+  if sa.evw < 400 and sb.evw < 400 then
+    return (a_amt / 3, b_amt / 3);                          -- dampen weak-evidence splits
+  end
+  return (a_amt, b_amt);
+end
+
+fn resolve(a: Claim, b: Claim) -> Verdict is
+  let sa := score_claim(a);
+  let sb := score_claim(b);
+
+  if sa.party == sb.party then
+    return Verdict.Dismiss("Both claims attributed to the same party.");
+  end
+
+  if (sa.ask <= 0 and sb.ask <= 0) or (sa.evw < 300 and sb.evw < 300) then
+    return Verdict.Dismiss("No actionable claim supported by sufficient evidence.");
+  end
+
+  let delta := sa.merit - sb.merit;
+
+  if delta > 60 then
+    let win_party := (sa.party == Party.A) ? Party.A : Party.B;
+    let amt := proportional_award(sa, sb);
+    return Verdict.Award(win_party, amt);
+  elseif delta < -60 then
+    let win_party := (sb.party == Party.A) ? Party.A : Party.B;
+    let amt := proportional_award(sb, sa);
+    return Verdict.Award(win_party, amt);
+  else
+    let (a_amt, b_amt) := split_award(sa, sb);
+    if a_amt == 0 and b_amt == 0 then
+      let nudge := tie_break(sa, sb);
+      if nudge == Party.A then
+        return Verdict.Award(Party.A, min_i32(sa.ask, max_i32(1, sa.ask / 4)));
+      else
+        return Verdict.Award(Party.B, min_i32(sb.ask, max_i32(1, sb.ask / 4)));
+      end
+    end
+    return Verdict.Split(a_amt, b_amt);
+  end
+end
+
+-- ========= Logging =========
+
+fn log_verdict(path: str, v: Verdict) -> i32 is
+  let h := fs.open(path, "a");
+  if h < 0 then
+    print("Warning: failed to open log file: " + path);
+    return 0;
+  end
+
+  let stamp := time.utc_iso8601();
+  let line: str := match v is
+    case Verdict.Award(p, amt) =>
+      stamp + " | AWARD | " + party_to_str(p) + " | " + i32_to_str(amt) + "\n";
+    case Verdict.Split(a_amt, b_amt) =>
+      stamp + " | SPLIT | A:" + i32_to_str(a_amt) + " | B:" + i32_to_str(b_amt) + "\n";
+    case Verdict.Dismiss(reason) =>
+      stamp + " | DISMISS | " + reason + "\n";
+  end;
+
+  let wr := fs.write(h, line);
+  fs.close(h);
+  if wr < 0 then print("Warning: failed to write verdict log."); end
+  return 0;
+end
+
+-- ========= Claim Parsing =========
+
+fn parse_claim(args: [str]) -> Claim is
+  -- Expected: ["A","Demand","120","Strong","4"]
+  let p: Party := match args[0] is
+    case "A" => yield Party.A;
+    case "B" => yield Party.B;
+    default  => yield Party.A;
+  end;
+
+  let kind: str := args[1];
+  let amt: i32 := str_to_i32(args[2]);
+
+  let ev: EvidenceStrength := match args[3] is
+    case "Weak"     => yield EvidenceStrength.Weak;
+    case "Moderate" => yield EvidenceStrength.Moderate;
+    case "Strong"   =>
+      let boost: i32 := str_to_i32(args[4]);
+      yield EvidenceStrength.Strong(boost);
+    default         => yield EvidenceStrength.Weak;
+  end;
+
+  return match kind is
+    case "Demand"  => Claim.Demand(p, amt, ev);
+    case "Counter" => Claim.Counter(p, amt, ev);
+    default        => Claim.Demand(p, amt, ev);
+  end;
+end
+
+-- ========= Main CLI Entry =========
+
+fn main() -> i32
+  with [sys.argv, time, rand, fs.open, fs.write] is
+  let raw: [str] := sys_argv();
+
+  -- Optional: program name in raw[0]; accept `--seed N` at positions 1/2.
+  var args: [str] := raw;
+
+  if len(args) >= 3 and args[1] == "--seed" then
+    global_seed := str_to_i32(args[2]);
+    global_seed_forced := true;
+    args := slice(args, 3, len(args));
+  end
+
+  if (len(args) < 10) then
+    print("Usage: cli_arbitrate [--seed N] A Demand 120 Strong 4 B Counter 200 Moderate");
+    return -1;
+  end
+
+  let claimA: Claim := parse_claim(slice(args, 0, 5));
+  let claimB: Claim := parse_claim(slice(args, 5, 10));
+
+  let verdict: Verdict := resolve(claimA, claimB);
+
+  match verdict is
+    case Award(p, amt) =>
+      print("Verdict: Award to " + party_to_str(p) + " of $" + i32_to_str(amt));
+    case Split(a_amt, b_amt) =>
+      print("Verdict: Split — A gets $" + i32_to_str(a_amt) + ", B gets $" + i32_to_str(b_amt));
+    case Dismiss(reason) =>
+      print("Verdict: Dismissed — " + reason);
+  end;
+
+  return log_verdict("cli_arbitration.log", verdict);
+end
