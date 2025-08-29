@@ -1,0 +1,15 @@
+
+type Result is enum { Ok(i32, ms), Err(i32) };
+
+fn main() -> i32 is
+  let r: Result := Result.Ok(7, 500 ms);
+  let val: i32 := match r is
+    case Ok(x, 500 ms) when (x == 7 || x == 8) =>
+      yield x + 10;
+    case Err(code) =>
+      yield code;
+    default =>
+      yield -1;
+  end;
+  return val;
+end

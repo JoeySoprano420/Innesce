@@ -1,0 +1,16 @@
+
+type Option is enum { None, Some(i32) };
+
+fn main() -> i32 is
+  let a: Option := Option.Some(5);
+  let x: i32 := match a is
+    case Some(v) when (v > 0 && v < 10) => 
+      let y: i32 := v + 1;
+      yield y;
+    case None => 
+      yield 0;
+    default =>
+      yield 42;
+  end;
+  return x;
+end
