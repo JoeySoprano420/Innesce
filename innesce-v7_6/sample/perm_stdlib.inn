@@ -1,0 +1,14 @@
+
+-- Permissioned stdlib stub usage (remember to set gates)
+fn main() -> i32 with [fs.read, fs.write, fs.open, net, net.tcp, rand, time] is
+  let fd: i32 := fs_open_i32();
+  let x: i32 := fs_read_i32();
+  let ok: i32 := fs_write_i32();
+  let n: i32 := net_ping_i32();
+  let t: i32 := net_tcp_i32();
+  let ro: i32 := fs_open("file.txt");
+  let nt: i32 := net_tcp("example.com", 80);
+  let rr: i32 := rand_range(10, 20);
+  sleep(100 ms);
+  return fd + x + ok + n + t + ro + nt + rr;
+end
