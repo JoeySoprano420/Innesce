@@ -1,0 +1,17 @@
+
+-- Tuple pattern binds + guards + match as expression
+fn main() -> i32 with [Hot, time] is
+  let (a, t): (i32, ms) := asm {
+    intel;
+    outs ={eax}(_), ={ebx}(_);
+    ins  i(5), i(1500);
+    clobbers cc;
+    body: mov eax, 5; mov ebx, 1500;
+  };
+  let res: i32 := match (asm { intel; outs ={eax}(_), ={ebx}(_); ins i(a), i(t); body: mov eax, a; mov ebx, t; }) is
+    case (x, 1000 ms) when (x + 5) -> i32 => x + 1
+    case (5, _)                      =>  2
+    default                          =>  0
+  end;
+  return res;
+end

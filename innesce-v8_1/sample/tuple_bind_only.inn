@@ -1,0 +1,10 @@
+
+-- Only binds; no guard
+fn main() -> i32 is
+  let (x, y): (i32, i32) := asm { intel; outs ={eax}(_), ={ebx}(_); ins i(7), i(9); body: mov eax, 7; mov ebx, 9; };
+  let r: i32 := match (asm { intel; outs ={eax}(_), ={ebx}(_); ins i(x), i(y); body: mov eax, x; mov ebx, y; }) is
+    case (a, 9) => a
+    default     => 0
+  end;
+  return r;
+end
