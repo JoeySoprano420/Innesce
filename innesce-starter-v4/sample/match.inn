@@ -1,0 +1,12 @@
+-- Enums + match
+type Color is enum { Red, Green, Blue };
+
+fn main() -> i32 is
+  let c: Color := Green;
+
+  match c is
+    case Red   => return 10;
+    case Green => return 20;
+    case Blue  => return 30;
+  end
+end
