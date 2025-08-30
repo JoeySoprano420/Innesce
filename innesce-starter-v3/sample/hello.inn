@@ -1,0 +1,6 @@
+-- Minimal Innesce sample
+fn main() -> i32 is
+  let x: i32 := 40;
+  let y: i32 := 2;
+  return x;  -- you can change to `return y;` etc.
+end
