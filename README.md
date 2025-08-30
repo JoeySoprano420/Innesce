@@ -1738,5 +1738,154 @@ fn main() -> i32
       print("Verdict: Dismissed — " + reason);
   end;
 
+_____
+
+Here’s the current, implemented surface of Innesce as it stands in your repo (v9.x / late-Aug 2025), pulled straight from your sources, samples, and the v9.1 release notes.
+
+TL;DR
+
+It’s a C++23 + LLVM AOT compiler with a working frontend (lexer/parser/sema), an LLVM IR backend, and a tiny gated stdlib (fs/net/rand/time). The language already supports durations as first-class types, tuples (including mixed types), enums-with-payloads, match as an expression/statement with guards, and multi-output inline asm that destructures directly into tuples. Object files are produced and linked with clang. 
+GitHub
++2
+GitHub
++2
+
+What’s working now
+
+Build & CLI
+
+CMake project in C++23; optional LLVM backend (LLVM 17+). A CLI innescec target is present; usage in samples shows compiling .inn → .o, then linking with clang. 
+GitHub
+
+Example flow shown in repo docs: ./build/innescec sample/match_tuple.inn -o match_tuple.o then clang match_tuple.o -o match_tuple. 
+GitHub
+
+Frontend (lexer/parser/sema)
+
+Implemented components under src/frontend: tokenization, parsing, and semantic checks for functions, let, tuples, enums with payloads, durations (ms, sec), match (expr + stmt) with yield, and guards (&&, ||). The docs and samples mirror these constructs. 
+GitHub
++1
+
+Types & expressions
+
+Durations (ms, sec) are distinct, unit-checked types with explicit casts; constant-folding like (1500 ms as sec) -> 1 is called out. Strings (str) and i32 are present; tuples can mix primitive + duration types. 
+GitHub
++1
+
+Tuples: structural, allow mixed types; destructuring supported (including from asm). 
+GitHub
+
+Control flow & patterns
+
+match as expression/statement with guards; PHI-based merging of yields in SSA form; payload patterns on enums. 
+GitHub
+
+Inline assembly (multi-output)
+
+asm {…} supports multiple outputs and direct tuple destructuring; samples show outs ={eax}(_), ={ebx}(_) with inputs/constraints and clobbers. You can even match on an asm-produced tuple. 
+GitHub
+
+Effect “gates” + tiny stdlib
+
+Compile-time capability gates via with [fs.open, net.tcp, rand, time]; calls like fs_open, net_tcp, rand_range, and sleep(100 ms) are available behind these gates. 
+GitHub
++1
+
+Backend & IR details
+
+LLVM backend present; enum payloads are lowered to a compact struct { i32 tag; i32 fields[N]; }; tuple/enums often become simple extractvalue moves; match lowers to branches with PHI merges. Object files link via the system toolchain. 
+GitHub
+
+Performance posture (by design)
+
+Zero-overhead intent for units/tuples/match/gates (checks erase at AOT); optimizations lean on LLVM (DCE/SROA/mem2reg/inst-combine, etc.). Expect parity with optimized C/Rust for equivalent algorithms in the hot path. 
+GitHub
+
+What’s not promised yet (explicitly)
+
+No borrow-checker/ownership model and no static data-race proofs at this stage; gates are compile-time discipline, not a runtime sandbox. Inline asm and FFI remain “you break it, you own it.” 
+GitHub
   return log_verdict("cli_arbitration.log", verdict);
 end
+
+_____
+
+—here’s the plain-English version.
+
+# What Innesce is
+
+Think of Innesce as a **new programming language + compiler**. You write code in `.inn` files, and the Innesce compiler turns that into fast machine code (using LLVM under the hood), then you link it to make a normal program you can run.
+
+# What it can do today
+
+* **Basic programs work:** variables, functions, numbers, strings—no drama.
+* **Real time units built in:** you can write `1500 ms` or `2 sec`, convert between them, and the compiler keeps you from mixing them up by mistake.
+* **Tuples (grouped values):** return or pass multiple values together, and pull them apart easily.
+* **Enums “with data”:** like `Result = Ok(number) | Err(message)` so you can return success/failure cleanly.
+* **`match` (smart switch):** tidy branching over values and enum cases, with optional conditions (guards like `when x > 0`).
+* **Inline assembly (advanced):** you can drop to CPU instructions and even return multiple results straight into a tuple.
+* **Tiny standard library (opt-in):** file access, basic networking, random numbers, and sleeping—**but only if you explicitly allow them** so it’s clear what your program can touch.
+
+# What that means in practice
+
+You can already build:
+
+* Small utilities and demos
+* Programs that sleep or measure time precisely
+* Tools that read/write files
+* Simple network experiments (e.g., open a TCP connection)
+* Code that uses clean pattern-matching for control flow
+* Low-level experiments with inline assembly
+
+# What it’s *not* yet
+
+* **Not a big batteries-included ecosystem** (libraries are minimal).
+* **Not a safety fortress:** there’s no Rust-style ownership/borrow checker; inline asm/FFI are “power tools”—use carefully.
+* **Not a runtime sandbox:** those effect “gates” are compile-time declarations, not security walls.
+
+# How you use it (big picture)
+
+1. Compile your `.inn` file to an object file:
+
+```
+innescec myprog.inn -o myprog.o
+```
+
+2. Link it into an executable (using your C/Clang toolchain):
+
+```
+clang myprog.o -o myprog
+```
+
+3. Run it like any other program:
+
+```
+./myprog
+```
+
+# A tiny taste of the language
+
+```inn
+-- Time-safe math
+let t = 1500 ms;
+let s = t as sec;  -- s is 1 sec
+
+-- Enums with data + match
+enum Result = Ok(i32) | Err(str);
+
+fn handle(r: Result) -> i32 is
+  match r is
+    case Ok(x) when x > 0 => yield x;
+    case Ok(_)            => yield 0;
+    case Err(msg)         => yield -1;
+  end;
+
+-- Opt in to file and time effects
+with [fs.open, time]
+fn main() is
+  fs_write("out.txt", "hello");
+  sleep(200 ms);
+end;
+```
+
+
